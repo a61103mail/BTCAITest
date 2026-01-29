@@ -1,27 +1,29 @@
-# C.py
+# C.py - 回測模擬 (V41: 資金控管 + 完整修復版)
 from A import get_market_data
 from B import ask_ai_for_signal
 import time
 import requests
 import os
-from dotenv import load_dotenv # 👈 新增
+from dotenv import load_dotenv
 from colorama import Fore, Style, init
 
 init(autoreset=True)
-load_dotenv() # 👈 載入環境變數
+
+# 🔥 強制指定 .env 路徑
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(env_path)
 
 # ==========================================
-# ⚙️ V40 參數設定
+# ⚙️ V41 參數設定
 # ==========================================
-# 從 .env 讀取網址
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-
 if not DISCORD_WEBHOOK_URL:
-    print(Fore.YELLOW + "⚠️ 警告：未設定 Discord Webhook，將不會發送通知。")
+    print(Fore.YELLOW + "⚠️ 警告：未設定 Discord Webhook")
 
 SYMBOL = 'BTC/USDT'
 TIMEFRAME = '15m'
-DATA_LIMIT = 1000 
+DATA_LIMIT = 2000 # 建議跑多一點數據
 
 LEVERAGE = 20
 SCORE_THRESHOLD = 60 
@@ -38,9 +40,9 @@ position = None
 trade_history = []
 
 def send_discord(msg):
-    if "http" not in DISCORD_WEBHOOK_URL: return
+    if not DISCORD_WEBHOOK_URL: return
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg, "username": "V40 AI Trader"})
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg, "username": "V41 AI Trader"})
     except: pass
 
 def run_backtest():
@@ -49,11 +51,11 @@ def run_backtest():
     df = get_market_data(SYMBOL, TIMEFRAME, DATA_LIMIT)
     if df.empty: return
 
-    print(f"\n🚀 V40 資金控管系統啟動 (Lv: {LEVERAGE}x)")
-    print(f"📊 設定: 風險控制 {RISK_PER_TRADE*100}% | 凱利分數 > {SCORE_THRESHOLD}")
+    print(f"\n🚀 V41 量價動能系統啟動 (Lv: {LEVERAGE}x)")
+    print(f"📊 設定: 風控 {RISK_PER_TRADE*100}% | 凱利分數 > {SCORE_THRESHOLD}")
     print("=" * 60)
     
-    send_discord(f"🚀 **V40 系統啟動**\n本金: {balance} U\n單筆風控: {RISK_PER_TRADE*100}%")
+    send_discord(f"🚀 **V41 系統啟動**\n本金: {balance} U\n單筆風控: {RISK_PER_TRADE*100}%")
 
     last_price = 0
 
@@ -87,13 +89,12 @@ def run_backtest():
                     sl_dist = atr * 1.5
                     tp_dist = atr * 2.0
                     
-                    # 🔥 資金控管計算
                     sl_percent = sl_dist / price 
                     risk_with_leverage = sl_percent * LEVERAGE
-                    # 計算倉位大小: (本金 * 2%風險) / 槓桿後的跌幅風險
-                    if risk_with_leverage == 0: risk_with_leverage = 0.01 # 防呆
+                    if risk_with_leverage == 0: risk_with_leverage = 0.01
+                    
                     pos_size = (balance * RISK_PER_TRADE) / risk_with_leverage
-                    pos_size = min(pos_size, balance) # 不能超過現有餘額
+                    pos_size = min(pos_size, balance)
                     
                     position = {
                         'type': 'LONG', 
@@ -120,10 +121,10 @@ def run_backtest():
                     sl_dist = atr * 1.5
                     tp_dist = atr * 2.0
                     
-                    # 🔥 資金控管計算
                     sl_percent = sl_dist / price
                     risk_with_leverage = sl_percent * LEVERAGE
                     if risk_with_leverage == 0: risk_with_leverage = 0.01
+                    
                     pos_size = (balance * RISK_PER_TRADE) / risk_with_leverage
                     pos_size = min(pos_size, balance)
                     
@@ -155,51 +156,33 @@ def run_backtest():
         else:
             p_type = position['type']
             entry_price = position['entry']
-            pos_size = position['size'] # 取出倉位
+            pos_size = position['size']
             
             if p_type == 'LONG': raw_pnl = (price - entry_price) / entry_price
             else: raw_pnl = (entry_price - price) / entry_price
             
-            # 🔥 損益計算只針對「投入的倉位 (pos_size)」
             real_pnl = pos_size * raw_pnl * LEVERAGE
             
-            # 🛑 止損出場
+            # 止損
             if (p_type == 'LONG' and price <= position['sl']) or \
                (p_type == 'SHORT' and price >= position['sl']):
                 balance += real_pnl
-                
-                msg = (
-                    f"🛑 **{p_type} 止損出場**\n"
-                    f"🕒 時間: {time_str}\n"
-                    f"🔻 進場價: {entry_price:.2f}\n"
-                    f"🔻 出場價: {price:.2f}\n"
-                    f"💸 虧損: {real_pnl:.2f} U"
-                )
+                msg = f"🛑 **{p_type} 止損**\n時間: {time_str}\n虧損: {real_pnl:.2f} U"
                 print(Fore.RED + msg)
                 send_discord(msg)
-                
                 trade_history.append('LOSS')
                 position = None
 
-            # 💰 止盈出場
+            # 止盈
             elif (p_type == 'LONG' and price >= position['tp']) or \
                  (p_type == 'SHORT' and price <= position['tp']):
                 balance += real_pnl
-                
-                msg = (
-                    f"💰 **{p_type} 止盈獲利**\n"
-                    f"🕒 時間: {time_str}\n"
-                    f"🚀 進場價: {entry_price:.2f}\n"
-                    f"🚀 出場價: {price:.2f}\n"
-                    f"💵 獲利: +{real_pnl:.2f} U"
-                )
+                msg = f"💰 **{p_type} 止盈**\n時間: {time_str}\n獲利: +{real_pnl:.2f} U"
                 print(Fore.GREEN + msg)
                 send_discord(msg)
-                
                 trade_history.append('WIN')
                 position = None
 
-    # 強制結算
     if position:
         p_type = position['type']
         entry_price = position['entry']
@@ -211,7 +194,7 @@ def run_backtest():
         balance += final_pnl
         send_discord(f"🏁 **強制平倉**\n時間: {time_str}\n結算損益: {final_pnl:.2f} U")
 
-    end_msg = f"📊 **V40 結算**\n餘額: {balance:.2f} U\n淨利: {balance - INITIAL_BALANCE:.2f} U"
+    end_msg = f"📊 **V41 結算**\n餘額: {balance:.2f} U\n淨利: {balance - INITIAL_BALANCE:.2f} U"
     print("="*60)
     print(end_msg)
     send_discord(end_msg)

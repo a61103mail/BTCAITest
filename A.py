@@ -1,10 +1,10 @@
-# A.py - 數據工廠 (強制修復 EMA/VWAP 欄位問題)
+# A.py - 數據工廠 (V41: 量價動能版)
 import ccxt
 import pandas as pd
 import pandas_ta as ta
 
-def get_market_data(symbol='BTC/USDT', timeframe='15m', limit=1000):
-    print(f"🔄 V39 系統: 下載 {symbol} 數據 (含 ADX 動態權重)...")
+def get_market_data(symbol='BTC/USDT', timeframe='15m', limit=2000): # 預設改為 2000 根
+    print(f"🔄 V41 系統: 下載 {symbol} 數據 (含 ADX + RVOL 動能指標)...")
     
     try:
         exchange = ccxt.binance()
@@ -13,72 +13,60 @@ def get_market_data(symbol='BTC/USDT', timeframe='15m', limit=1000):
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         
-        # 🔥【修復 1】去除重複時間戳，防止索引衝突
+        # 去除重複並設定索引
         df.drop_duplicates(subset=['timestamp'], keep='last', inplace=True)
-        
-        # 設定時間索引
         df.set_index('timestamp', inplace=True)
         
         # --- 1. 基礎指標 ---
         df['RSI'] = df.ta.rsi(length=14)
         
-        # MACD (處理欄位)
+        # MACD
         macd = df.ta.macd(fast=12, slow=26, signal=9)
-        # 找出柱狀圖 (Hist) 欄位
         if isinstance(macd, pd.DataFrame):
             hist_col = [c for c in macd.columns if 'h' in c or 'HIST' in c.upper()][0]
             df['MACD_HIST'] = macd[hist_col]
         else:
             df['MACD_HIST'] = macd
 
-        # 🔥【修復 2】EMA 200 強制轉成單一欄位
+        # EMA 200
         ema_result = df.ta.ema(length=200)
-        if isinstance(ema_result, pd.DataFrame):
-            # 如果回傳是表格，只取第一欄
-            df['EMA_200'] = ema_result.iloc[:, 0]
-        else:
-            # 如果是單行數據，直接用
-            df['EMA_200'] = ema_result
+        df['EMA_200'] = ema_result.iloc[:, 0] if isinstance(ema_result, pd.DataFrame) else ema_result
         
-        # 🔥【修復 3】VWAP 強制轉成單一欄位
+        # VWAP
         vwap_result = df.ta.vwap()
-        if isinstance(vwap_result, pd.DataFrame):
-             df['VWAP'] = vwap_result.iloc[:, 0] 
-        else:
-             df['VWAP'] = vwap_result
+        df['VWAP'] = vwap_result.iloc[:, 0] if isinstance(vwap_result, pd.DataFrame) else vwap_result
 
         # ATR
         atr_res = df.ta.atr(length=14)
-        if isinstance(atr_res, pd.DataFrame):
-            df['ATR'] = atr_res.iloc[:, 0]
-        else:
-            df['ATR'] = atr_res
+        df['ATR'] = atr_res.iloc[:, 0] if isinstance(atr_res, pd.DataFrame) else atr_res
 
         # ADX 趨勢強度
         adx_df = df.ta.adx(length=14)
         if isinstance(adx_df, pd.DataFrame):
-            # ADX 通常回傳 3 欄 (ADX, DMP, DMN)，我們只要 ADX
             adx_col = [c for c in adx_df.columns if c.startswith('ADX')][0]
             df['ADX'] = adx_df[adx_col]
         else:
             df['ADX'] = adx_df
 
-        # --- 2. V39 智能分數計算 (Smart Score) ---
+        # 🔥【V41 新增】RVOL 相對成交量 (車子的油)
+        # 1. 算出過去 20 根 K 線的平均成交量
+        vol_sma = df.ta.sma(close=df['volume'], length=20)
+        vol_sma = vol_sma.iloc[:, 0] if isinstance(vol_sma, pd.DataFrame) else vol_sma
         
-        # 定義訊號 (1=看多, 0=看空)
+        # 2. RVOL = 當前成交量 / 平均成交量 (加 0.001 避免除以 0)
+        df['RVOL'] = df['volume'] / (vol_sma + 0.001)
+
+        # --- 2. V39 智能分數計算 ---
         s_rsi_b = (df['RSI'] < 45).astype(int)
         s_rsi_s = (df['RSI'] > 55).astype(int)
-        
         s_ema_b = (df['close'] > df['EMA_200']).astype(int)
         s_ema_s = (df['close'] < df['EMA_200']).astype(int)
-        
         s_macd_b = (df['MACD_HIST'] > 0).astype(int)
         s_macd_s = (df['MACD_HIST'] < 0).astype(int)
-        
         s_vwap_b = (df['close'] > df['VWAP']).astype(int)
         s_vwap_s = (df['close'] < df['VWAP']).astype(int)
 
-        # 動態權重分配
+        # ADX 動態權重
         w_trend = df['ADX'].apply(lambda x: 2.0 if x > 25 else 0.5)
         w_osc = df['ADX'].apply(lambda x: 0.5 if x > 25 else 2.0)
         w_base = 1.0
@@ -100,7 +88,5 @@ def get_market_data(symbol='BTC/USDT', timeframe='15m', limit=1000):
         return df
 
     except Exception as e:
-        import traceback
         print(f"❌ 數據抓取失敗: {e}")
-        # traceback.print_exc() # 如果需要詳細錯誤可以打開這行
         return pd.DataFrame()

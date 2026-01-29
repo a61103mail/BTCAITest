@@ -1,22 +1,24 @@
-# B.py
+# B.py - AI 大腦 (V41: 車子與油邏輯)
 import google.generativeai as genai
 import json
 import warnings
 import time
 import os
-from dotenv import load_dotenv # 👈 新增
+from dotenv import load_dotenv
 
-# 載入 .env 檔案
-load_dotenv()
+# 🔥 強制指定 .env 路徑 (修復讀取不到的問題)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(current_dir, ".env")
+load_dotenv(env_path)
 
 # ==========================================
-# 🔑 API KEY 池 (從環境變數讀取)
+# 🔑 API KEY 池
 # ==========================================
 keys_str = os.getenv("GEMINI_KEYS")
 if not keys_str:
-    raise ValueError("❌ 找不到 GEMINI_KEYS，請檢查 .env 檔案！")
+    print(f"❌ 錯誤：在 {env_path} 找不到 GEMINI_KEYS")
+    raise ValueError("找不到 GEMINI_KEYS")
 
-# 將逗號隔開的字串轉回 List
 API_KEYS = [k.strip() for k in keys_str.split(',') if k.strip()]
 # ==========================================
 
@@ -44,39 +46,47 @@ def ask_ai_for_signal(row, trend):
     global model
     rotate_key()
     
-    # 判斷市場狀態
+    # --- V41 新增邏輯：車子與油 ---
     adx_val = row['ADX']
-    market_state = "強烈趨勢中 (Trend)" if adx_val > 25 else "震盪盤整中 (Range)"
+    rvol = row['RVOL']
     
-    # 取得 V39 智能分數
+    market_state = "強烈趨勢" if adx_val > 25 else "盤整震盪"
+    
+    # 判斷油量狀態
+    if rvol > 1.2:
+        vol_state = "🔥 爆量 (動力充足)"
+    elif rvol < 0.8:
+        vol_state = "💤 縮量 (動力不足)"
+    else:
+        vol_state = "⚖️ 正常量"
+
     score_bull = row['SCORE_BULL']
     score_bear = row['SCORE_BEAR']
     
     prompt = f"""
-    你是 V39 高階交易算法的決策中樞。請根據數學機率進行交易：
+    你是 V41 高階量化交易員。請結合「趨勢(ADX)」與「動能(Volume)」進行決策：
     
-    【市場狀態】
-    ADX: {adx_val:.1f} ({market_state})
-    - ADX > 25 時，應順著 EMA/MACD 交易。
-    - ADX < 25 時，應重視 RSI 超買超賣。
+    【市場環境分析】
+    1. 趨勢強度 (ADX): {adx_val:.1f} ({market_state}) -> 這代表車子的速度。
+    2. 量能動力 (RVOL): {rvol:.2f} ({vol_state}) -> 這代表車子的油量。
+       ⚠️ 警告: RVOL < 0.8 代表沒油了，就算指標有訊號，也極大機率是假突破 (插針)，請回傳 WAIT。
+       ⚠️ 提示: RVOL > 1.2 代表油量充足，若配合分數高，勝率極高。
     
-    【V39 智能評分 (已加權)】
-    多頭得分: {score_bull:.1f} / 100
-    空頭得分: {score_bear:.1f} / 100
+    【V39 智能評分】
+    多頭: {score_bull:.1f} / 空頭: {score_bear:.1f}
     
-    【當前數據】
+    【技術數據】
     價格: {row['close']}
-    RSI: {row['RSI']:.1f}
-    MACD柱: {row['MACD_HIST']:.4f}
     EMA200: {row['EMA_200']:.1f}
+    RSI: {row['RSI']:.1f}
+    MACD: {row['MACD_HIST']:.4f}
     
-    【凱利決策邏輯】
-    1. 只有當某一方的「智能得分」顯著高於另一方 (例如 > 60分)，才考慮進場。
-    2. 如果 多頭得分 > 60 且 多頭得分 > 空頭得分 -> 考慮 BUY。
-    3. 如果 空頭得分 > 60 且 空頭得分 > 多頭得分 -> 考慮 SELL。
-    4. 如果分數接近或都低於 50 -> 絕對 WAIT (凱利值為負，不賭博)。
+    【操作規則】
+    1. **嚴禁無量交易**：如果 RVOL < 0.8，除非分數高達 85 分以上，否則一律 WAIT。
+    2. **順勢而為**：當 ADX > 25 時，請嚴格遵守 EMA200 方向。
+    3. **凱利過濾**：多空分數差距需 > 15 分才考慮進場。
     
-    回傳 JSON: {{"action": "BUY" | "SELL" | "WAIT", "reason": "簡短理由 (含分數分析)"}}
+    回傳 JSON: {{"action": "BUY" | "SELL" | "WAIT", "reason": "分析原因 (請包含對 RVOL 量能的看法)"}}
     """
 
     max_retries = len(API_KEYS)
