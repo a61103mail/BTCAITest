@@ -53,7 +53,7 @@ def run_backtest():
     print(f"📊 設定: 風控 {RISK_PER_TRADE*100}% | 輸出: losing_trades.json")
     print("=" * 60)
     
-    send_discord(f"🚀 **V43 回測啟動**\n本金: {balance} U\n策略: RSI安全區(35-65) + ADX過濾")
+    send_discord(f"🚀 **V46 動態區間解鎖版**\n本金: {balance} U\n策略: RSI安全區(35-65) + ADX過濾")
 
     last_price = 0
 
