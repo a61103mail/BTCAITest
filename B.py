@@ -1,4 +1,4 @@
-# B.py - AI 大腦 (V47: 黃金復刻版 - Back to Basics)
+# B.py - AI 大腦 (V48: 智能解鎖版 - 找回 V41 的獲利爆發力)
 import google.generativeai as genai
 import json
 import warnings
@@ -38,70 +38,75 @@ def ask_ai_for_signal(row, trend):
     global model
     
     # ==========================================
-    # 🔥 V47 黃金復刻防火牆 (Classic Hard Filters)
+    # 🔥 V48 底線防火牆 (Baseline Filters)
     # ==========================================
-    # 回歸 V41 的獲利邏輯，配合標準風控
+    # 我們只保留「過濾垃圾」的底線，拆除「限制獲利」的上限
     
     rsi = row['RSI']
     adx = row['ADX']
     rvol = row['RVOL']
     ema_dist = row['EMA_DIST']
     
-    # 1. RSI 標準安全區 (30 ~ 70)
-    # 不再使用動態區間，回歸最穩定的教科書標準。
-    # 拒絕 RSI > 70 的追高，拒絕 RSI < 30 的殺低。
-    if rsi > 70: 
-        return {"action": "WAIT", "reason": f"🛑 硬體攔截: RSI {rsi:.1f} 進入超買區 (>70)，拒絕追高"}
-    if rsi < 30: 
-        return {"action": "WAIT", "reason": f"🛑 硬體攔截: RSI {rsi:.1f} 進入超賣區 (<30)，拒絕殺低"}
-
-    # 2. ADX 強趨勢門檻 (25)
-    # 回歸 V40/V41 的標準。23 太低容易遇到假突破，25 才是真行情的開始。
+    # 1. 保留趨勢底線 (ADX > 25)
+    # 這是過濾盤整盤最有效的工具，必須保留。
     if adx < 25:
         return {"action": "WAIT", "reason": f"🛑 硬體攔截: ADX {adx:.1f} 不足 25，趨勢不明顯"}
     
-    # 3. RVOL 有效量能 (0.8)
-    # 0.8 代表至少有平常 80% 的量，避免在無人交易的時段進場。
+    # 2. 保留量能底線 (RVOL > 0.8)
+    # 這是過濾假突破的工具，必須保留。
     if rvol < 0.8:
         return {"action": "WAIT", "reason": f"🛑 硬體攔截: RVOL {rvol:.2f} 縮量，缺乏動能"}
     
-    # 4. 乖離率保護
-    # 避免價格已經飛太遠時進場接刀
-    if abs(ema_dist) > 2.0:
-        return {"action": "WAIT", "reason": f"🛑 硬體攔截: 乖離率 {ema_dist:.1f}% 過大，等待回歸"}
+    # 3. 乖離率保護 (防止極端追高)
+    if abs(ema_dist) > 3.0: # 放寬到 3%，給大行情一點空間
+        return {"action": "WAIT", "reason": f"🛑 硬體攔截: 乖離率 {ema_dist:.1f}% 過極端，等待回歸"}
+
+    # ❌ 刪除了 RSI > 70 / < 30 的硬體攔截
+    # 讓 AI 決定是「過熱」還是「強勢噴發」
 
     # ==========================================
-    # 讓 AI 專注於結構分析
+    # 交給 AI 進行「強勢區」判斷
     # ==========================================
     rotate_key()
     
-    if adx > 50: market_state = "⚠️ 過熱趨勢" # 提醒 AI 注意
+    if adx > 50: market_state = "⚠️ 極度強勢 (注意反轉)"
     else: market_state = "🚀 健康趨勢"
     
     vol_state = "🔥 爆量" if rvol > 1.2 else "📈 放量"
+
+    # RSI 狀態描述
+    if rsi > 70: rsi_state = "🔥 超買鈍化區 (強勢)"
+    elif rsi < 30: rsi_state = "❄️ 超賣鈍化區 (弱勢)"
+    else: rsi_state = "✅ 安全操作區"
 
     score_bull = row['SCORE_BULL']
     score_bear = row['SCORE_BEAR']
     
     prompt = f"""
-    你是 V47 頂尖交易員。我們回歸了【V41 的獲利架構】：只做趨勢明確 (ADX>25) 且量能足夠 (RVOL>0.8) 的單。
+    你是 V48 頂尖交易員。我們移除了 RSI 的硬體限制，因為我們要抓到【主升段】的暴利。
+    請根據數據判斷現在是「強勢噴發」還是「頂部背離」。
     
     【市場數據】
     1. 趨勢 (ADX): {adx:.1f} ({market_state})
     2. 動能 (RVOL): {rvol:.2f} ({vol_state})
-    3. RSI: {rsi:.1f} (已確認在 30-70 安全區)
+    3. RSI: {rsi:.1f} ({rsi_state})
     4. 乖離率: {ema_dist:.2f}%
     
     【智能評分】
     多頭: {score_bull:.1f} / 空頭: {score_bear:.1f}
     
-    【決策任務】
-    請進行最後確認 (這也是 V41 的核心邏輯)：
-    1. **分數確認**：多空分數差距必須 > 15 (凱利過濾)。
-    2. **趨勢一致**：做多時價格應在 EMA200 上方，做空應在下方。
-    3. **避免背離**：雖然 RSI 在安全區，但如果價格創新高而 RSI 沒創新高 (背離)，請謹慎。
+    【決策邏輯】
+    1. **凱利過濾**：多空分數差距必須 > 15。
+    2. **超買區操作 (RSI > 70)**：
+       - 只有當 RVOL > 1.5 (爆量) 且 ADX 持續上升時，才允許追多 (視為強勢鈍化)。
+       - 否則視為過熱，回傳 WAIT。
+    3. **超賣區操作 (RSI < 30)**：
+       - 只有當 RVOL > 1.5 (爆量) 且 ADX 持續上升時，才允許追空 (視為崩盤)。
+       - 否則視為過冷，回傳 WAIT。
+    4. **安全區操作 (30-70)**：
+       - 正常依照分數與趨勢進場。
     
-    回傳 JSON: {{"action": "BUY" | "SELL" | "WAIT", "reason": "分析原因"}}
+    回傳 JSON: {{"action": "BUY" | "SELL" | "WAIT", "reason": "分析原因 (針對 RSI 位置與量能配合)"}}
     """
 
     max_retries = len(API_KEYS)
